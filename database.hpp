@@ -78,12 +78,6 @@ inline int mydb::writeTmpFile()
     return 0;
 }
 
-inline int mydb::renameTmpfileToWritefile(const std::string& tmpfile, const std::string& writefile)
-{
-    std::ofstream[tmpfile];
-    std::filesystem::rename(tmpfile,writefile);
-}
-
 // memory operation
 namespace operate_in_memory {
     // READ
@@ -99,20 +93,19 @@ inline std::string operate_in_memory::operateFetch(const std::string& key)
     std::map<std::string, std::string>::iterator itr = map_data.find(key);
     if (itr != map_data.end()) {
         // std::cout << map_data[key] << std::endl;
-        read_value = map_data[key];
-        return 0;
+        return map_data[key];
     } else {
         // std::cout << "key:"<< key << " not found" << std::endl;
-        return -1;
+        return "";
     }
 }
 inline int operate_in_memory::operateUpsert(const std::string& key, const std::string& value = "")
 {
     if(value.empty()){
         std::cout << "Value Not Found";
-        return -1;
+        return 1;
     }
-    // map_data[key] = value;
+    map_data[key] = value;
     return 0;
 }
 inline int operate_in_memory::operateDelete(const std::string& key)
@@ -142,18 +135,18 @@ inline std::string& operate_base::operate(const std::string& operation, const st
 */
 
 // log
-namespace log{
+namespace data_log{
     int readLog();
-    int writeLog(std::string l_w, std::string operation, std::string key, std::string value);
+    int writeLog(std::map<std::string,std::string>& input_query);
 };
 
 // 対応関係 writeは一つだがreadは...
-inline int log::readLog()
+inline int data_log::readLog()
 {
     std::ifstream read_file(LOG_FILE_NAME, std::ios::in);
     if (!read_file){
         std::cout << "Error File Can't Open" << std::endl;
-        return -1;
+        return 1;
     }
     std::string read_line_buffer;
     while (!read_file.eof()){
@@ -180,16 +173,16 @@ inline int log::writeLog(std::string l_w, std::string operation, std::string key
     return 0;
 }
 */
-inline int log::writeLog(std::map<std::string,std::string>& input_query)
+inline int data_log::writeLog(std::map<std::string,std::string>& input_query)
 {
     std::ofstream writing_file;
     writing_file.open(LOG_FILE_NAME, std::ios::app);
 
-    if(input_query['value'] != ""){
-        writing_file << input_query['ope'] << ' ' << input_query['key'] << ' ' << input_query['val'] << std::endl;
+    if(input_query["value"] != ""){
+        writing_file << input_query["ope"] << " " << input_query["key"] << " " << input_query["val"] << std::endl;
     }
     else{
-        writing_file << input_query['ope'] << ' ' << input_query['key'] << std::endl;
+        writing_file << input_query["ope"] << " " << input_query["key"] << std::endl;
     }
     writing_file.close();
     return 0;
@@ -199,74 +192,65 @@ inline int log::writeLog(std::map<std::string,std::string>& input_query)
 namespace transaction{
 
     // beginとcommit
-    int begin();
-    int commit();
+    void begin();
+    void commit();
 
-    // それぞれクエリを実行する
-    int exec_common_action();
     // read
-    std::string t_select();
+    std::string t_select(const std::string& key);
     // write
-    int t_upsert();
-    int t_delete();
+    void t_upsert(const std::string& key, const std::string& value);
+    void t_delete(const std::string& key);
 };
 
-inline int begin()
+inline void transaction::begin()
 {
     isTransact = true;
-    return 0;
 }
 
-inline int commit()
+inline void transaction::commit()
 {
     assert(isTransact);
+    std::map<std::string,std::string> input_query = {
+        {"ope", "option"},
+        {"key", "commit"}
+    };
+    data_log::writeLog(input_query);
     mydb::writeTmpFile();
-
-    // crcとかの確認を行う？？
     isTransact = false;
-    return 0;
 }
 
-inline int exec_common_action(const std::map<std::string,std::string>& input_query)
-{
-    log::writeLog(input_query)
-    return 0;
-}
-
-inline std::string t_select(const std::string& key)
+inline std::string transaction::t_select(const std::string& key)
 {
     std::map<std::string,std::string> input_query = {
         {"ope", "select"},
         {"key", key},
         {"value", ""}
     };
-    exec_common_action(input_query);
-    std::string read_value = operate_in_memory::operateFetch(query["key"]);
+    std::string read_value = operate_in_memory::operateFetch(input_query["key"]);
+    data_log::writeLog(input_query);
     return read_value;
 }
 
-inline std::string t_upsert(const std::string& key, const std::string& value="")
+inline void transaction::t_upsert(const std::string& key, const std::string& value="")
 {
     std::map<std::string,std::string> input_query = {
         {"ope", "upsert"},
         {"key", key},
         {"value", value}
     };
-    exec_common_action(input_query);
-    operate_in_memory::operateUpsert(query["key"], query["value"]);
-    return 0;
+    operate_in_memory::operateUpsert(input_query["key"], input_query["value"]);
+    data_log::writeLog(input_query);
 }
 
-inline std::string t_delete(const std::string& key)
+inline void transaction::t_delete(const std::string& key)
 {
     std::map<std::string,std::string> input_query = {
         {"ope", "delete"},
         {"key", key},
         {"value", ""}
     };
-    exec_common_action(input_query);
-    operate_in_memory::operateDelete(query["key"]);
-    return 0;
+    operate_in_memory::operateDelete(input_query["key"]);
+    data_log::writeLog(input_query);
 }
 
 // Checkppointing
